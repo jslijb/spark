@@ -95,6 +95,9 @@ RDD 算子
 			key1,(val1+val2)
 			key2,(val3+val4)
 			
+	reduceByKey 和 groupByKey的区别，图示说明
+	
+	
 		sc.textFile("hdfs://master:9000/test").flatMap{ x=> x.split(" ")}.map{ x=> (x,1)}.reduceByKey((x,y) => x + y).foreach(println(_))
 			(how,1)
 			(you,1)
