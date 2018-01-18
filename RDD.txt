@@ -1,0 +1,191 @@
+创建RDD 3种方法
+	1、从外部数据源进行创建(HDFS,HBASE等)
+		Cassandra、Amazon S3,spark 支持的文本文件、SequeceFile和任何hadoop InputFormat格式的文件
+		val input = sc.textFile("/spark/train_new.data").foreach(println)
+		[root@master data]# hadoop fs -ls /spark/train_new.data
+		-rw-r--r--   3 root supergroup      81439 2018-01-15 16:22 /spark/train_new.data
+		textFile("hdfs path")
+	2、从父RDD创建
+		val words = input.flatMap{ x=>
+			x.split("\t")
+		}
+	3、并行化集合makeRDD()函数和parallelize() 函数,这两个函数是sparkContext 自带的函数
+		scala> val words_1 = Array("three","one","three","two","fource","five","one","five")
+		scala> sc.parallelize(words_1).foreach(println(_))
+				three
+				one
+				three
+				two
+				fource
+				five
+				one
+				five
+		scala> sc.makeRDD(words_1).foreach(println(_))
+				three
+				one
+				three
+				two
+				fource
+				five
+				one
+				five
+	
+		makeRDD 和 parallelize 这两者的区别
+		先看这两个函数的源码
+		def parallelize[T:ClassTag](
+			seq:Seq[T],numSlice:Int=defaultParallelism):RDD[T]
+		def makeRDD[T:ClassTag](
+			seq:Seq[T],numSlice:Int=defaultParallelism):RDD[T]
+		def makeRDD[T:ClassTag](seq:Seq[(T,Seq[String])]).RDD[T]
+		
+		makeRDD 第一种方法和parallelize 完全一样。接受的参数类型：序列(数组，列表，字符串，以及任意可迭代对象等)
+		makeRDD 第二种方法，接受参数类型seq(Int,seq(String))
+		示例:
+			val seq3 = List((1,List("ab","cd","de")),(2,List("abc","bcd")),(3,List("abcde","bcdef",3)))
+			sc.makeRDD(seq3).foreach(println(_))
+				(1,List(ab, cd, de))
+				(2,List(abc, bcd))
+				(3,List(abcde, bcdef, 3))
+			val seq2 = List((1,List("ab","cd","de")),(2,List("abc","bcd")),(3,List("abcde","bcdef")))
+			sc.makeRDD(seq2).foreach(println(_))  # 这里只输出最前面位置信息。注意seq2 和 seq3 的区别
+				1
+				2
+				3
+			# 两个序列嵌套，外层序列中元素数据类型Int，而且只有1个元素；内层序列中所有元素的数据类型是String类型
+			# 注意下面两段代码的区别
+			scala> sc.makeRDD(Array((1,List("a","b")),(2,List("c","d")),(3,List("e")))).foreach(println(_))
+				2
+				1
+				3
+			scala> sc.makeRDD(Array((1,2,List("a","b")),(2,3,List("c","d")),(3,4,List("e")))).foreach(println(_))
+				(1,2,List(a, b))
+				(3,4,List(e))
+				(2,3,List(c, d))
+			
+			
+RDD 算子
+	foreach(println(_))：可以随时输出RDD 中的内容，一般用在RDD之间转换的时候，观察RDD内容的变化情况
+	
+	flatMap{} 把一个句子打平成每一个单词
+		input：how do you do  
+		output
+			how
+			do
+			you
+			do
+			
+		[root@master tmp]# hadoop fs -text /test
+			how do you do
+		scala> sc.textFile("hdfs://master:9000/test").foreach(println(_))
+			how do you do
+		scala> sc.textFile("hdfs://master:9000/test").flatMap{ x=> x.split(" ")}.foreach(println(_))
+			how
+			do
+			you
+			do
+			split(" ") 以空格分开，和python一样这样会将一个字符串变成一个列表。
+	reduceByKey  先按key进行分组，默认情况下将相同的key所对应的value 进行相加。相当于map combine。
+				 在本地将相同的key合并在传给reduce，减少网络I/O
+		input:
+			key1,val1
+			key1,val2
+			key2,val3
+			key2,val4
+		output:
+			key1,(val1+val2)
+			key2,(val3+val4)
+			
+		sc.textFile("hdfs://master:9000/test").flatMap{ x=> x.split(" ")}.map{ x=> (x,1)}.reduceByKey((x,y) => x + y).foreach(println(_))
+			(how,1)
+			(you,1)
+			(do,2)
+		# 下面是简写 reduceByKey 默认做相加操作
+		sc.textFile("hdfs://master:9000/test").flatMap{ x=> x.split(" ")}.map{ x=> (x,1)}.reduceByKey(_+_).foreach(println(_))
+			(how,1)
+			(you,1)
+			(do,2)
+			
+		scala> sc.parallelize(List((1,2),(1,3),(3,4),(3,6))).reduceByKey((x,y) => x + y).foreach(println(_))
+			(1,5)
+			(3,10)
+		scala> sc.parallelize(List((1,2),(1,3),(3,4),(3,6))).reduceByKey(_+_).foreach(println(_))
+			(3,10)
+			(1,5)
+		scala> sc.parallelize(List((1,2),(1,3),(3,4),(3,6))).reduceByKey((x,y) => x * y).foreach(println(_))
+			(1,6)
+			(3,24)
+		reduceByKey(fun) 传递自定义函数
+		
+		package spark.example
+
+		import org.apache.spark._
+		import SparkContext._
+
+		object Test_reduceByKey {
+			def main(args: Array[String]) {
+				val conf = new SparkConf().setAppName("TEST")
+
+				val sc = new SparkContext(conf)
+				val a = List((1,3),(1,2),(2,4),(3,5),(4,6),(1,6))
+				val inputRDD = sc.parallelize(a)
+				inputRDD.reduceByKey(sum).collect().foreach(println(_))
+			}
+			def sum( a:Int, b:Int) : Int = {
+				var sum:Int = 0
+				sum = a + b
+				return sum
+			}
+		}
+		输出
+		(4,6)
+		(2,4)
+		(1,11)
+		(3,5)
+	groupByKey 按key分组，将相同key对应的value值添加至一个sequence中。如果要对这个sequence做聚合操作，最好使用reduceByKey
+			   groupByKey() 不能自定义函数，只能通过map来应用自定义的函数。而reduceByKey(fun) 这里可以直接给定自定义的函数名
+	
+		input:
+			key1,val1
+			key1,val2
+			key3,val3
+			key2,val4
+			key2,val5
+			key3,val6
+			key1,val7
+			key2,val8
+		output:
+			key1,[val1,val2,val3,val7]
+			key3,[val3,val6]
+			key2,[val4,val5,val8]
+		输出不按key排序，也不一定是按key输入的顺序输出。
+		val words = Array("one","two","three","one","two","one","five","three")
+		val wordPairssRDD = sc.parallelize(words).map(word => (word,1))
+		val wordCountsWithGroupByKey = wordPairssRDD.groupByKey().collect()
+			wordCountsWithGroupByKey: Array[(String, Iterable[Int])] = Array((two,CompactBuffer(1, 1)), (one,CompactBuffer(1, 1, 1)), (three,CompactBuffer(1, 1)), (five,CompactBuffer(1)))
+		
+	
+	reduce 聚合，求一个序列中所有元素之和，先将序列中的第一个和第二个元素相加所得的值和第3个数相加，一直进行到最后一个元素
+		scala> val c = sc.parallelize(1 to 10)
+		c: org.apache.spark.rdd.RDD[Int] = ParallelCollectionRDD[86] at parallelize at <console>:24
+		
+		# 可以简写 reduce 默认做相加操作
+		scala> c.reduce(_+_)
+		res53: Int = 55
+
+		scala> c.reduce((x,y) => x + y)
+		res54: Int = 55
+		
+		reduce 内部计算过程：
+		1 + 2 = 3
+		3 + 3 = 6
+		6 + 4 = 10
+		10 + 5 = 15
+		15 + 6 = 21
+		21 + 7 = 28
+		28 + 8 = 36
+		36 + 9 = 45
+		45 + 10 = 55
+		
+	collect 算子，返回RDD 中所有的元素，按照输入的顺序返回，不排序
+		scala> val b = sc.parallelize(List((1,2),(2,3),(1,3),(4,5),(3,4),(3,6),(1,5))).collect()
+		b: Array[(Int, Int)] = Array((1,2), (2,3), (1,3), (4,5), (3,4), (3,6), (1,5))
